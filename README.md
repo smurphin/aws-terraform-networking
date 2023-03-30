@@ -22,7 +22,7 @@ module "aws_networking" {
   public_subnet_cidr_blocks = ["10.0.1.0/24", "10.0.2.0/24"]
   private_subnet_cidr_blocks = ["10.0.3.0/24", "10.0.4.0/24"]
 }
-'''
+```
 
 In this example, we're creating a new VPC with a CIDR block of 10.0.0.0/16. We're also creating two public subnets (10.0.1.0/24 and 10.0.2.0/24) and two private subnets (10.0.3.0/24 and 10.0.4.0/24).
 
