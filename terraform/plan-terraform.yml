@@ -1,0 +1,289 @@
+name: plan-terraform
+
+on:
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+  
+  workflow_call:
+    inputs:
+      app:
+        description: "The name of the application as recorded in Platform Metadata."
+        required: true
+        type: string
+      tenant:
+        description: "Applicable only for L-JE deployments that require a tenant."
+        required: false
+        type: string
+        default: all
+      aws-env:
+        description: "The name of the AWS environment to deploy to."
+        required: true
+        type: string
+      terraform-working-dir:
+        description: "The directory where terraform will init and plan from."
+        required: true
+        type: string
+      terraform-version:
+        description: "The version of terraform the use."
+        required: false
+        type: string
+        default: "1.3.5"
+      pipelines-repo-version:
+        description: "The branch/commit/tag/reference of the github-actions/pipelines repository to use."
+        default: "v1"
+        required: false
+        type: string
+    secrets:
+      VAULT_ROLE_ID:
+        description: "The vault role id for authenticating with Vault"
+        required: true
+      VAULT_SECRET_ID:
+        description: "The vault secret id for authenticating with Vault"
+        required: true
+      TERRAFORM_OPTS:
+        description: 'The vars willing to pass to terraform plan example -var="image_id=ami-abc123"'
+        required: false
+
+jobs:
+  plan:
+    runs-on: terraform-runner
+    
+    #defaults:
+      #run:
+        #working-directory: terraform
+        #app: example
+        #aws-env: just-eat-networks-monitoring-prod
+
+    if: |
+      github.event.issue.pull_request != ''
+      && startsWith(github.event.comment.body, '/plan')
+    steps:
+      # TODO: move to separate action
+      # Use regex to parse the target passed with the /plan command on the PR comment
+      - name: Get specified environment from comment
+        id: get-selected-env
+        uses: actions/github-script@v6
+        with:
+          script: |
+            // Extract the deploy arguments from the trigger phrase containing these characters: a-z, A-Z, digits, hyphen
+            const regex = /\/plan ([a-zA-Z\d\-]+)/;
+            const arguments = regex.exec(context.payload.comment.body);
+            core.info(`Arguments parsed: ${arguments}`);
+            let awsEnv;
+            if (arguments == null) {
+              awsEnv = "${{ inputs.aws-env }}";
+            } else {
+              awsEnv = arguments[1];
+            }
+            core.info(`Target environment: ${awsEnv}`);
+            return awsEnv;
+          result-encoding: string
+
+      # Due to how the triggers for comments work, the PR details must be retrieved first to correctly checkout the PR branch
+      - name: Get Pull Request details
+        uses: actions/github-script@v6
+        id: get-pr
+        with:
+          script: |
+            core.info(`Getting Pull Request #${context.issue.number} from ${context.repo.owner}/${context.repo.repo}`);
+            try {
+              const result = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.issue.number
+              });
+              return result.data;
+            } catch (err) {
+              core.setFailed(`Request failed with error ${err}`);
+            }
+      # TODO: move to separate action
+      - name: Leave started notification
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const awsEnv = "${{ steps.get-selected-env.outputs.result }}";
+            const commitSha = "${{ fromJSON(steps.get-pr.outputs.result).head.sha }}"
+            core.info(`Leaving start comment on #${context.issue.number} from ${context.repo.owner}/${context.repo.repo}`);
+            core.info(`Targeting environment: ${awsEnv}`);
+            try {
+              const workflowUrl = `${{ github.server_url }}/${context.repo.owner}/${context.repo.repo}/actions/runs/${process.env.GITHUB_RUN_ID}`;
+              // Leave started comment on the PR
+              let message = `:rocket: [Terraform plan job](${workflowUrl}) to `;
+              message += `${awsEnv}`;
+              message += " has started. :hourglass:";
+              message += "\n\n";
+              message += "<details>\n";
+              message += "<summary>Terraform plan help :sos:</summary>\n";
+              message += "\n";
+              message += "## Instructions\n";
+              message += "\n";
+              message += "Terraform plans are started by comments in GitHub pull requests.\n";
+              message += "\n";
+              message += "* Type `/plan` to start a new terraform plan to the default environment.\n";
+              message += "* Type `/plan {environment name}` to start a new terraform plan to a specific environment.\n";
+              message += "\n";
+              message += "</details>\n";
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: message
+              });
+              // Add a commit status to the current commit
+              const normalizedEnv = awsEnv.toLowerCase();
+              const statusContext = `terraform-plan/${normalizedEnv}`;
+              const description = `Terraform plan to ${normalizedEnv} has started...`;
+              await github.rest.repos.createCommitStatus({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                sha: commitSha,
+                state: 'pending',
+                target_url: workflowUrl,
+                description,
+                context: statusContext
+              });
+            } catch (err) {
+              core.setFailed(`Request failed with error ${err}`);
+            }
+      # Checkout required repositories
+      ## Checkout the discovered PR branch
+      - name: Checkout code repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 1
+          repository: ${{ fromJSON(steps.get-pr.outputs.result).head.repo.full_name }}
+          ref: ${{ fromJSON(steps.get-pr.outputs.result).head.ref }}
+
+      - name: Checkout pipelines repository
+        uses: actions/checkout@v3
+        with:
+          repository: github-actions/pipelines
+          ref: ${{ inputs.pipelines-repo-version }}
+          path: pipelines
+
+      # Apply all pre-setup actions
+      #- name: Run Terraform pre-deploy setup
+      # uses: ./pipelines/actions/setup-terraform
+      # with:
+      #   app: ${{ inputs.app }}
+      #   aws-env: ${{ steps.get-selected-env.outputs.result }}
+      #   github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run tfenv
+        run: >
+          if test -f "${{ inputs.terraform-working-dir }}/.terraform-version"; then
+            tfenv use;
+          else
+            tfenv use ${{ inputs.terraform-version }};
+          fi
+      - name: Run terraform init
+        id: init
+        run: terraform init
+
+      - name: Run terraform fmt
+        id: fmt
+        run: terraform fmt -check -diff
+        continue-on-error: true
+
+      - name: Run terraform validate
+        id: validate
+        run: terraform validate
+
+      # Run terraform plan, stripping colours for proper rendering
+      - name: Run terraform plan
+        id: plan
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+        run: |
+          terraform plan \
+          -var-file="environments/${{ steps.get-selected-env.outputs.result }}/${{ steps.get-selected-env.outputs.result }}.tfvars" \
+          -input=false \
+          -no-color ${{ secrets.TERRAFORM_OPTS }} \
+          -out tf.plan \
+          && terraform show -no-color tf.plan > /tmp/${{ steps.get-selected-env.outputs.result }}.txt
+      - name: Set terraform plan env var
+        run: |
+          PLAN=$(cat /tmp/${{ steps.get-selected-env.outputs.result }}.txt)
+          echo "PLAN<<EOF" >> "$GITHUB_ENV"
+          echo "$PLAN" >> "$GITHUB_ENV"
+          echo "EOF" >> "$GITHUB_ENV"
+      - name: Create success comment
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const awsEnv = "${{ steps.get-selected-env.outputs.result }}";
+            const commitSha = "${{ fromJSON(steps.get-pr.outputs.result).head.sha }}"
+            const output = `## Terraform plan for ${awsEnv}
+            #### Terraform Format and Style 🖌\`${{ steps.fmt.outcome }}\`
+            #### Terraform Initialisation ⚙️\`${{ steps.init.outcome }}\`
+            #### Terraform Validation 🤖\`${{ steps.validate.outcome }}\`
+            #### Terraform Plan 📖\`${{ steps.plan.outcome }}\`
+            <details><summary>Show Plan</summary>
+            \`\`\`tf\n
+            ${process.env.PLAN}
+            \`\`\`
+            </details>
+            *Pushed by: @${{ github.actor }}*`;
+            try {
+              const workflowUrl = `${{ github.server_url }}/${context.repo.owner}/${context.repo.repo}/actions/runs/${process.env.GITHUB_RUN_ID}`;
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: output
+              })
+              // Add a commit status to the current commit
+              const normalizedEnv = awsEnv.toLowerCase();
+              const statusContext = `terraform-plan/${normalizedEnv}`;
+              const description = `Terraform plan to ${normalizedEnv} has succeeded.`;
+              await github.rest.repos.createCommitStatus({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                sha: commitSha,
+                state: 'success',
+                target_url: workflowUrl,
+                description,
+                context: statusContext
+              });
+            } catch (err) {
+              core.setFailed(`Request failed with error ${err}`);
+            }
+      - name: Leave failure notification
+        uses: actions/github-script@v6
+        if: ${{ failure() }}
+        with:
+          script: |
+            const awsEnv = "${{ steps.get-selected-env.outputs.result }}";
+            const commitSha = "${{ fromJSON(steps.get-pr.outputs.result).head.sha }}"
+            core.info(`Leaving failure comment on #${context.issue.number} from ${context.repo.owner}/${context.repo.repo}`);
+            core.info(`Targeting environment: ${awsEnv}`);
+            try {
+              const workflowUrl = `${{ github.server_url }}/${context.repo.owner}/${context.repo.repo}/actions/runs/${process.env.GITHUB_RUN_ID}`;
+              // Leave failure comment on the PR
+              let message = `:x: [Terraform plan](${workflowUrl}) to `;
+              message += `${awsEnv}`;
+              message += " has failed.";
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: message
+              });
+              // Add a commit status to the current commit
+              const normalizedEnv = awsEnv.toLowerCase();
+              const statusContext = `terraform-plan/${normalizedEnv}`;
+              const description = `Terraform plan to ${normalizedEnv} has failed.`;
+              await github.rest.repos.createCommitStatus({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                sha: commitSha,
+                state: 'failure',
+                target_url: workflowUrl,
+                description,
+                context: statusContext
+              });
+            } catch (err) {
+              core.setFailed(`Request failed with error ${err}`);
+            }

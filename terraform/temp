@@ -1,0 +1,72 @@
+# TODO: move to separate action
+        uses: actions/github-script@v6
+      - name: Leave started notification
+        with:
+          script: |
+            const awsEnv = "${{ steps.get-selected-env.outputs.result }}";
+            const commitSha = "${{ fromJSON(steps.get-pr.outputs.result).head.sha }}"
+            core.info(`Leaving start comment on #${context.issue.number} from ${context.repo.owner}/${context.repo.repo}`);
+            core.info(`Targeting environment: ${awsEnv}`);
+            try {
+              const workflowUrl = `${{ github.server_url }}/${context.repo.owner}/${context.repo.repo}/actions/runs/${process.env.GITHUB_RUN_ID}`;
+              // Leave started comment on the PR
+              let message = `:rocket: [Terraform plan job](${workflowUrl}) to `;
+              message += `${awsEnv}`;
+              message += " has started. :hourglass:";
+              message += "\n\n";
+              message += "<details>\n";
+              message += "<summary>Terraform plan help :sos:</summary>\n";
+              message += "\n";
+              message += "## Instructions\n";
+              message += "\n";
+              message += "Terraform plans are started by comments in GitHub pull requests.\n";
+              message += "\n";
+              message += "* Type `/plan` to start a new terraform plan to the default environment.\n";
+              message += "* Type `/plan {environment name}` to start a new terraform plan to a specific environment.\n";
+              message += "\n";
+              message += "</details>\n";
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: message
+              });
+              // Add a commit status to the current commit
+              const normalizedEnv = awsEnv.toLowerCase();
+              const statusContext = `terraform-plan/${normalizedEnv}`;
+              const description = `Terraform plan to ${normalizedEnv} has started...`;
+              await github.rest.repos.createCommitStatus({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                sha: commitSha,
+                state: 'pending',
+                target_url: workflowUrl,
+                description,
+                context: statusContext
+              });
+            } catch (err) {
+              core.setFailed(`Request failed with error ${err}`);
+            }
+      # Checkout required repositories
+      ## Checkout the discovered PR branch
+      - name: Checkout code repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 1
+          repository: ${{ fromJSON(steps.get-pr.outputs.result).head.repo.full_name }}
+          ref: ${{ fromJSON(steps.get-pr.outputs.result).head.ref }}
+
+      - name: Checkout pipelines repository
+        uses: actions/checkout@v3
+        with:
+          repository: github-actions/pipelines
+          ref: ${{ inputs.pipelines-repo-version }}
+          path: pipelines
+
+      # Apply all pre-setup actions
+      #- name: Run Terraform pre-deploy setup
+      # uses: ./pipelines/actions/setup-terraform
+      # with:
+      #   app: ${{ inputs.app }}
+      #   aws-env: ${{ steps.get-selected-env.outputs.result }}
+      #   github-token: ${{ secrets.GITHUB_TOKEN }}
