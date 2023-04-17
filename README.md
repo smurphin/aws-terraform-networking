@@ -23,6 +23,10 @@ module "aws_networking" {
   private_subnet_cidr_blocks = ["10.0.3.0/24", "10.0.4.0/24"]
 }
 ```
+To authenticate to AWS from a local terminal use the follwoing attributes to set credentials (note putting a space before the EXPORT statement keeps the command out of your Bash history) 
+
+SET AWS_ACCESS_KEY_ID=*your_access_key_here*
+SET AWS_SECRET_ACCESS_KEY=*your_secret_key_here*
 
 In this example, we're creating a new VPC with a CIDR block of 10.0.0.0/16. We're also creating two public subnets (10.0.1.0/24 and 10.0.2.0/24) and two private subnets (10.0.3.0/24 and 10.0.4.0/24).
 
@@ -45,3 +49,4 @@ This module exports the following output variables:
 ## Contributing
 
 Contributions to this module are welcome! If you find a bug or have a feature request, please open an issue on the GitHub repository.
+

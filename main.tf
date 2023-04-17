@@ -17,10 +17,4 @@ terraform {
 provider "aws" {
  region = "${var.region}"
 
-  assume_role {
-    # The account id changes depending on environment. Match id to the environment you deploy to.
-    # You can find the account id in backstage.
-    role_arn     = 
-    session_name = "enterprisetransitgateway"
-  }
 }
