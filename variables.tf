@@ -1,53 +1,24 @@
+variable region {}
 
+variable s3_bucket {}
 
-variable "region" {
-  default = "eu-west-1"
-  type = string
+variable s3_key {}
+
+variable vpc_cidr {}
+
+variable public_subnet_1 {}
+
+variable public_subnet_2 {}
+
+variable private_subnet_1 {}
+
+variable private_subnet_2 {}
+
+variable az_1 {
+  default = "a"
 }
 
-variable "region_prefix" {
-  default = "eu-west-"
-  type = string
+variable az_2 {
+  default = "b"
 }
 
-variable environment {}
-
-variable tgw_bgp_asn {
-  type = string
-}
-
-variable vpn_spoke {
-  default = {}
-  type = map(object({
-    spoke_bgp_asn = string
-    spoke_public_ip = string
-  }))
-}
-
-variable ipsec_type {
-  default = "ipsec.1"
-  type = string
-}
-
-variable destination_cidr {
-  default = {}
-  type = map(object({
-    spoke_destination_cidr = string
-  }))
-}
-
-
-
-variable "primary_az" {
-  default = "1a"
-  type = string
-}
-
-variable "secondary_az" {
-  default = "1b"
-  type = string
-}
-
-
-
-variable "account_id" {}

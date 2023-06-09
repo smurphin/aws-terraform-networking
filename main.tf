@@ -1,9 +1,7 @@
 terraform {
-  #required_version = ">= 0.11.0"
-  #backend "artifactory" {
-  #  url      = "https://artifactory.cd.je-labs.com/artifactory"
-  #}
-
+# configure the backend for remote state file storage
+  backend "s3" {}
+  
   required_providers {
       aws = {
         source  = "hashicorp/aws"
@@ -12,9 +10,7 @@ terraform {
   }
 }
 
-
-
+# Required provider
 provider "aws" {
- region = "${var.region}"
-
+  region = var.region
 }
